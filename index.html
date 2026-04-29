@@ -281,11 +281,71 @@
               </section>
 
               <aside class="side-stack">
-                <div class="sync-card">
-                  <h3>本地同步已开启</h3>
-                  <p>您的偏好和日程会保存在当前浏览器中，像 app 一样持续可用。</p>
-                  <span>LOCAL SYNC</span>
-                </div>
+                <section class="panel cloud-panel">
+                  <div class="panel-head compact-head">
+                    <div>
+                      <h3>云端同步</h3>
+                      <p class="panel-copy">接入 Supabase 后，任务、课表和设置可以跟着账号走，不再只留在当前浏览器里。</p>
+                    </div>
+                    <span id="cloud-status-badge" class="cloud-badge">LOCAL ONLY</span>
+                  </div>
+
+                  <div class="cloud-form-grid">
+                    <label>
+                      Supabase URL
+                      <input
+                        id="cloud-project-url"
+                        type="url"
+                        inputmode="url"
+                        placeholder="https://your-project.supabase.co"
+                      />
+                    </label>
+                    <label>
+                      Supabase 公钥
+                      <textarea
+                        id="cloud-anon-key"
+                        rows="3"
+                        placeholder="粘贴 anon / publishable key"
+                      ></textarea>
+                    </label>
+                    <label>
+                      登录邮箱
+                      <input
+                        id="cloud-email"
+                        type="email"
+                        inputmode="email"
+                        placeholder="用于接收魔法登录链接"
+                      />
+                    </label>
+                  </div>
+
+                  <div class="cloud-action-row">
+                    <button id="cloud-connect" class="secondary-btn" type="button">连接项目</button>
+                    <button id="cloud-send-link" class="secondary-btn" type="button">发送登录链接</button>
+                    <button id="cloud-sync-now" class="primary-btn" type="button">立即同步</button>
+                  </div>
+
+                  <div class="cloud-action-row">
+                    <button id="cloud-pull" class="ghost-btn" type="button">从云端恢复</button>
+                    <label class="switch-row inline-switch">
+                      <span>
+                        自动同步
+                        <small>每次改任务和设置后，自动把最新版本推到云端。</small>
+                      </span>
+                      <input id="cloud-auto-sync" type="checkbox" checked />
+                    </label>
+                    <button id="cloud-sign-out" class="ghost-btn" type="button">退出账号</button>
+                  </div>
+
+                  <div class="cloud-meta">
+                    <div class="status-pill-row">
+                      <div id="cloud-user-text" class="status-pill">未登录云端账号</div>
+                      <div id="cloud-sync-meta" class="status-pill accent">尚未同步</div>
+                    </div>
+                    <p id="cloud-status-copy" class="panel-copy">当前仍是本地模式。配置好 Supabase 并登录后，ZenPlan 就能跨浏览器同步数据。</p>
+                    <p id="cloud-error-text" class="cloud-error hidden"></p>
+                  </div>
+                </section>
 
                 <section class="panel insight-panel">
                   <div class="panel-head compact-head">
@@ -468,6 +528,7 @@
       </section>
     </div>
 
+    <script src="cloud-config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

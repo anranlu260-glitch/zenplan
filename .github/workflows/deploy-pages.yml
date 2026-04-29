@@ -34,6 +34,7 @@ jobs:
           cp index.html public/index.html
           cp styles.css public/styles.css
           cp app.js public/app.js
+          cp cloud-config.js public/cloud-config.js
           cp manifest.json public/manifest.json
           touch public/.nojekyll
 

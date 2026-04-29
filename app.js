@@ -1,8 +1,27 @@
-const STORAGE_KEY = "smart-planner-state-v1";
+const STORAGE_KEY = "smart-planner-state-v2";
+const SUPABASE_SCRIPT_SRC = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+const CLOUD_STATE_TABLE = "planner_states";
+const CLOUD_PROVIDER = "supabase";
+const APP_SHARE_URL = "https://anranlu260-glitch.github.io/zenplan/";
+const OWNER_CLOUD_CONFIG = window.ZENPLAN_CLOUD_CONFIG || {};
 const DEFAULT_PLANNING_WINDOWS = {
   morning: { start: "08:00", end: "12:00" },
   afternoon: { start: "14:00", end: "18:00" },
   evening: { start: "19:00", end: "22:00" },
+};
+
+const DEFAULT_CLOUD_STATE = {
+  provider: CLOUD_PROVIDER,
+  projectUrl: OWNER_CLOUD_CONFIG.supabaseUrl || "",
+  anonKey: OWNER_CLOUD_CONFIG.supabaseAnonKey || "",
+  email: "",
+  autoSync: true,
+  lastSyncedAt: "",
+  lastSyncedSource: "",
+  lastError: "",
+  userId: "",
+  userLabel: "",
+  status: OWNER_CLOUD_CONFIG.supabaseUrl && OWNER_CLOUD_CONFIG.supabaseAnonKey ? "configured" : "local_only",
 };
 
 const DEFAULT_STATE = {
@@ -70,6 +89,10 @@ const DEFAULT_STATE = {
     preferGapBlocks: true,
     planningWindows: DEFAULT_PLANNING_WINDOWS,
   },
+  cloud: DEFAULT_CLOUD_STATE,
+  meta: {
+    updatedAt: new Date().toISOString(),
+  },
   lastPlanSignature: "",
 };
 
@@ -78,6 +101,12 @@ let notificationTimers = [];
 let editingTaskId = null;
 let lastRenderedSchedule = [];
 let lastRenderedScheduleDate = "";
+let supabaseClient = null;
+let supabaseConfigSignature = "";
+let supabaseScriptPromise = null;
+let cloudAuthSubscription = null;
+let cloudSyncTimer = null;
+let cloudBusy = false;
 
 const els = {
   tabs: document.querySelectorAll(".nav-tab"),
@@ -154,6 +183,20 @@ const els = {
   windowEveningEnd: document.querySelector("#window-evening-end"),
   soundToggle: document.querySelector("#sound-toggle"),
   notificationLog: document.querySelector("#notification-log"),
+  cloudProjectUrl: document.querySelector("#cloud-project-url"),
+  cloudAnonKey: document.querySelector("#cloud-anon-key"),
+  cloudEmail: document.querySelector("#cloud-email"),
+  cloudConnect: document.querySelector("#cloud-connect"),
+  cloudSendLink: document.querySelector("#cloud-send-link"),
+  cloudSyncNow: document.querySelector("#cloud-sync-now"),
+  cloudPull: document.querySelector("#cloud-pull"),
+  cloudSignOut: document.querySelector("#cloud-sign-out"),
+  cloudAutoSync: document.querySelector("#cloud-auto-sync"),
+  cloudStatusBadge: document.querySelector("#cloud-status-badge"),
+  cloudStatusCopy: document.querySelector("#cloud-status-copy"),
+  cloudUserText: document.querySelector("#cloud-user-text"),
+  cloudSyncMeta: document.querySelector("#cloud-sync-meta"),
+  cloudErrorText: document.querySelector("#cloud-error-text"),
 };
 
 function loadState() {
@@ -172,6 +215,14 @@ function normalizeState(nextState) {
     ...nextState,
     tasks: (nextState.tasks || []).map(normalizeTask),
     settings: normalizeSettings(nextState.settings),
+    cloud: normalizeCloud(nextState.cloud),
+    meta: normalizeMeta(nextState.meta),
+  };
+}
+
+function normalizeMeta(meta = {}) {
+  return {
+    updatedAt: meta.updatedAt || new Date().toISOString(),
   };
 }
 
@@ -250,6 +301,27 @@ function normalizeSettings(settings = {}) {
   };
 }
 
+function normalizeCloud(cloud = {}) {
+  const projectUrl = String(cloud.projectUrl ?? DEFAULT_CLOUD_STATE.projectUrl ?? "").trim();
+  const anonKey = String(cloud.anonKey ?? DEFAULT_CLOUD_STATE.anonKey ?? "").trim();
+
+  return {
+    provider: CLOUD_PROVIDER,
+    projectUrl,
+    anonKey,
+    email: String(cloud.email ?? "").trim(),
+    autoSync: cloud.autoSync ?? true,
+    lastSyncedAt: cloud.lastSyncedAt ?? "",
+    lastSyncedSource: cloud.lastSyncedSource ?? "",
+    lastError: cloud.lastError ?? "",
+    userId: cloud.userId ?? "",
+    userLabel: cloud.userLabel ?? "",
+    status:
+      cloud.status ??
+      (projectUrl && anonKey ? (cloud.userId ? "ready" : "configured") : "local_only"),
+  };
+}
+
 function normalizePlanningWindows(windows = DEFAULT_PLANNING_WINDOWS) {
   return {
     morning: normalizeWindow(windows.morning, DEFAULT_PLANNING_WINDOWS.morning),
@@ -264,8 +336,559 @@ function normalizeWindow(windowValue, fallback) {
   return parseMinutes(end) > parseMinutes(start) ? { start, end } : { ...fallback };
 }
 
-function saveState() {
+function touchStateMeta() {
+  state.meta = normalizeMeta({
+    ...state.meta,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function saveState({ markDirty = false, skipCloud = false } = {}) {
+  if (markDirty) touchStateMeta();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (markDirty && !skipCloud) queueCloudSync();
+}
+
+function hasCloudProjectConfig() {
+  return Boolean(state.cloud.projectUrl && state.cloud.anonKey);
+}
+
+function cloudSessionStorageKey(projectUrl) {
+  try {
+    return `zenplan-auth-${btoa(projectUrl).replace(/[+/=]/g, "").slice(0, 18)}`;
+  } catch {
+    return "zenplan-auth";
+  }
+}
+
+function appRedirectUrl() {
+  if (window.location.origin && window.location.origin !== "null") {
+    return `${window.location.origin}${window.location.pathname}`;
+  }
+  return APP_SHARE_URL;
+}
+
+function timestampValue(value) {
+  const next = new Date(value || 0).getTime();
+  return Number.isFinite(next) ? next : 0;
+}
+
+function snapshotForCloud() {
+  return {
+    tasks: state.tasks,
+    settings: state.settings,
+    meta: normalizeMeta(state.meta),
+    lastPlanSignature: state.lastPlanSignature,
+  };
+}
+
+function clearCloudError() {
+  state.cloud.lastError = "";
+}
+
+function setCloudError(message, { persist = true } = {}) {
+  state.cloud.status = "error";
+  state.cloud.lastError = message;
+  if (persist) saveState({ skipCloud: true });
+  renderCloudPanel();
+}
+
+function setCloudStatus(status) {
+  state.cloud.status = status;
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+}
+
+function applyCloudIdentity(session) {
+  const user = session?.user ?? null;
+  state.cloud.userId = user?.id || "";
+  state.cloud.userLabel =
+    user?.email || user?.user_metadata?.full_name || user?.phone || "";
+}
+
+function cloudStatusDescriptor() {
+  if (cloudBusy) {
+    return {
+      badge: "SYNCING",
+      tone: "warning",
+      copy: "ZenPlan 正在和云端核对最新版本，稍等一下就好。",
+    };
+  }
+
+  if (state.cloud.lastError) {
+    return {
+      badge: "ERROR",
+      tone: "danger",
+      copy: state.cloud.lastError,
+    };
+  }
+
+  if (!hasCloudProjectConfig()) {
+    return {
+      badge: "LOCAL ONLY",
+      tone: "muted",
+      copy: "当前还是本地模式。填入 Supabase URL 和公钥后，就能切到真正的云同步。",
+    };
+  }
+
+  if (!state.cloud.userId) {
+    return {
+      badge: "READY",
+      tone: "warning",
+      copy: "项目已连接。下一步用邮箱登录，把这份课表和任务归到你的账号名下。",
+    };
+  }
+
+  if (state.cloud.lastSyncedAt) {
+    return {
+      badge: "SYNCED",
+      tone: "default",
+      copy: "云端同步已接通。你在不同浏览器登录同一个邮箱后，可以拉到同一份数据。",
+    };
+  }
+
+  return {
+    badge: "SIGNED IN",
+    tone: "default",
+    copy: "云端账号已登录，还没有完成首轮同步。",
+  };
+}
+
+function renderCloudPanel() {
+  const descriptor = cloudStatusDescriptor();
+  const canSync = hasCloudProjectConfig() && Boolean(state.cloud.userId);
+
+  els.cloudProjectUrl.value = state.cloud.projectUrl;
+  els.cloudAnonKey.value = state.cloud.anonKey;
+  els.cloudEmail.value = state.cloud.email;
+  els.cloudAutoSync.checked = state.cloud.autoSync;
+
+  els.cloudStatusBadge.textContent = descriptor.badge;
+  if (descriptor.tone === "default") {
+    els.cloudStatusBadge.removeAttribute("data-tone");
+  } else {
+    els.cloudStatusBadge.dataset.tone = descriptor.tone;
+  }
+
+  els.cloudStatusCopy.textContent = descriptor.copy;
+  els.cloudUserText.textContent = state.cloud.userLabel || "未登录云端账号";
+  els.cloudSyncMeta.textContent = state.cloud.lastSyncedAt
+    ? `最近同步 ${new Date(state.cloud.lastSyncedAt).toLocaleString("zh-CN")}`
+    : "尚未同步";
+
+  if (state.cloud.lastError) {
+    els.cloudErrorText.textContent = state.cloud.lastError;
+    els.cloudErrorText.classList.remove("hidden");
+  } else {
+    els.cloudErrorText.textContent = "";
+    els.cloudErrorText.classList.add("hidden");
+  }
+
+  els.cloudSendLink.disabled = !hasCloudProjectConfig() || cloudBusy;
+  els.cloudSyncNow.disabled = !canSync || cloudBusy;
+  els.cloudPull.disabled = !canSync || cloudBusy;
+  els.cloudSignOut.disabled = !state.cloud.userId || cloudBusy;
+  els.cloudConnect.disabled = cloudBusy;
+}
+
+async function ensureSupabaseScript() {
+  if (window.supabase?.createClient) return window.supabase;
+  if (!supabaseScriptPromise) {
+    supabaseScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = SUPABASE_SCRIPT_SRC;
+      script.async = true;
+      script.onload = () => {
+        if (window.supabase?.createClient) {
+          resolve(window.supabase);
+        } else {
+          reject(new Error("Supabase SDK 已加载，但 createClient 不可用。"));
+        }
+      };
+      script.onerror = () => reject(new Error("Supabase SDK 加载失败，请检查网络连接。"));
+      document.head.appendChild(script);
+    });
+  }
+  return supabaseScriptPromise;
+}
+
+function cleanAuthRedirect() {
+  if (!window.location.origin || window.location.origin === "null") return;
+  if (!window.location.hash && !window.location.search.includes("code=")) return;
+  const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+  window.history.replaceState({}, document.title, cleanUrl);
+}
+
+async function handleCloudAuthChange(event, session) {
+  applyCloudIdentity(session);
+  clearCloudError();
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+
+  if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
+    cleanAuthRedirect();
+    if (state.cloud.userId) {
+      await syncCloudNow({ mode: "smart", announce: event === "SIGNED_IN" });
+    }
+    return;
+  }
+
+  if (event === "SIGNED_OUT") {
+    state.cloud.lastSyncedAt = "";
+    state.cloud.lastSyncedSource = "";
+    saveState({ skipCloud: true });
+    renderCloudPanel();
+  }
+}
+
+function bindCloudAuthListener(client) {
+  cloudAuthSubscription?.unsubscribe?.();
+  const authResult = client.auth.onAuthStateChange((event, session) => {
+    Promise.resolve(handleCloudAuthChange(event, session)).catch((error) => {
+      setCloudError(error.message || "云端登录状态更新失败。");
+    });
+  });
+  cloudAuthSubscription = authResult?.data?.subscription || null;
+}
+
+async function ensureCloudClient({ announce = false } = {}) {
+  if (!hasCloudProjectConfig()) {
+    if (announce) {
+      setCloudError("请先填入 Supabase URL 和公钥。", { persist: false });
+    }
+    renderCloudPanel();
+    return null;
+  }
+
+  const configSignature = `${state.cloud.projectUrl}::${state.cloud.anonKey}`;
+  if (supabaseClient && supabaseConfigSignature === configSignature) {
+    return supabaseClient;
+  }
+
+  const sdk = await ensureSupabaseScript();
+  supabaseClient = sdk.createClient(state.cloud.projectUrl, state.cloud.anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storageKey: cloudSessionStorageKey(state.cloud.projectUrl),
+    },
+  });
+  supabaseConfigSignature = configSignature;
+  bindCloudAuthListener(supabaseClient);
+
+  const sessionResult = await supabaseClient.auth.getSession();
+  if (sessionResult.error) {
+    throw sessionResult.error;
+  }
+
+  applyCloudIdentity(sessionResult.data.session);
+  clearCloudError();
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+
+  if (announce) {
+    addNotificationLog("云端项目已连接", "ZenPlan 已经接上 Supabase 项目。");
+  }
+
+  return supabaseClient;
+}
+
+function readCloudConfigFromInputs() {
+  return {
+    projectUrl: els.cloudProjectUrl.value.trim(),
+    anonKey: els.cloudAnonKey.value.trim(),
+    email: els.cloudEmail.value.trim(),
+    autoSync: els.cloudAutoSync.checked,
+  };
+}
+
+function storeCloudConfigFromInputs() {
+  const next = readCloudConfigFromInputs();
+  const previousSignature = `${state.cloud.projectUrl}::${state.cloud.anonKey}`;
+  const nextSignature = `${next.projectUrl}::${next.anonKey}`;
+  const projectChanged = previousSignature !== nextSignature;
+
+  state.cloud = normalizeCloud({
+    ...state.cloud,
+    ...next,
+    ...(projectChanged
+      ? {
+          userId: "",
+          userLabel: "",
+          lastSyncedAt: "",
+          lastSyncedSource: "",
+          status: next.projectUrl && next.anonKey ? "configured" : "local_only",
+        }
+      : {}),
+    lastError: "",
+  });
+
+  if (projectChanged) {
+    supabaseClient = null;
+    supabaseConfigSignature = "";
+    cloudAuthSubscription?.unsubscribe?.();
+    cloudAuthSubscription = null;
+  }
+
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+}
+
+async function getCloudSession() {
+  const client = await ensureCloudClient();
+  if (!client) return null;
+
+  const sessionResult = await client.auth.getSession();
+  if (sessionResult.error) throw sessionResult.error;
+  return sessionResult.data.session;
+}
+
+async function fetchCloudRow(userId) {
+  const result = await supabaseClient
+    .from(CLOUD_STATE_TABLE)
+    .select("user_id, state, updated_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+async function pushStateToCloud({ announce = false } = {}) {
+  const session = await getCloudSession();
+  if (!session?.user) {
+    throw new Error("请先登录云端账号，再上传你的任务和课表。");
+  }
+
+  const payload = {
+    user_id: session.user.id,
+    state: snapshotForCloud(),
+  };
+
+  const result = await supabaseClient
+    .from(CLOUD_STATE_TABLE)
+    .upsert(payload)
+    .select("updated_at")
+    .single();
+
+  if (result.error) throw result.error;
+
+  state.cloud.lastSyncedAt = result.data.updated_at || new Date().toISOString();
+  state.cloud.lastSyncedSource = "push";
+  state.cloud.status = "synced";
+  clearCloudError();
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+
+  if (announce) {
+    addNotificationLog("已上传到云端", "当前任务、课表和设置已经推送到 Supabase。");
+  }
+}
+
+function applyCloudSnapshot(snapshot, { announce = false } = {}) {
+  const preservedCloud = normalizeCloud(state.cloud);
+  const currentDate = els.planDate.value || todayString();
+
+  state = normalizeState({
+    ...DEFAULT_STATE,
+    ...snapshot,
+    cloud: preservedCloud,
+  });
+
+  state.cloud.lastSyncedSource = "pull";
+  clearCloudError();
+  saveState({ skipCloud: true });
+
+  if (!els.planDate.value) {
+    els.planDate.value = currentDate;
+  }
+
+  renderSettings();
+  renderTasks();
+  renderSchedule(false, false);
+
+  if (announce) {
+    addNotificationLog("已从云端恢复", "云端版本已经拉回当前设备。");
+  }
+}
+
+async function syncCloudNow({ mode = "smart", announce = false } = {}) {
+  if (cloudBusy) return;
+
+  const client = await ensureCloudClient({ announce });
+  if (!client) return;
+
+  const session = await getCloudSession();
+  if (!session?.user) {
+    if (announce) {
+      setCloudError("请先用邮箱登录云端账号。", { persist: false });
+    }
+    return;
+  }
+
+  cloudBusy = true;
+  renderCloudPanel();
+
+  try {
+    const remote = await fetchCloudRow(session.user.id);
+    const localStamp = timestampValue(state.meta.updatedAt);
+
+    if (!remote?.state) {
+      await pushStateToCloud({ announce });
+      return;
+    }
+
+    const remoteStamp = Math.max(
+      timestampValue(remote.state?.meta?.updatedAt),
+      timestampValue(remote.updated_at)
+    );
+
+    if (mode === "pull") {
+      applyCloudSnapshot(remote.state, { announce });
+      state.cloud.lastSyncedAt = remote.updated_at || new Date().toISOString();
+      state.cloud.status = "synced";
+      saveState({ skipCloud: true });
+      renderCloudPanel();
+      return;
+    }
+
+    if (mode === "push") {
+      await pushStateToCloud({ announce });
+      return;
+    }
+
+    if (remoteStamp > localStamp) {
+      applyCloudSnapshot(remote.state, { announce });
+      state.cloud.lastSyncedAt = remote.updated_at || new Date().toISOString();
+      state.cloud.status = "synced";
+      saveState({ skipCloud: true });
+      renderCloudPanel();
+      if (announce) {
+        addNotificationLog("云端版本较新", "已经自动拉取最近一次同步的内容。");
+      }
+      return;
+    }
+
+    if (localStamp > remoteStamp) {
+      await pushStateToCloud({ announce });
+      return;
+    }
+
+    state.cloud.lastSyncedAt = remote.updated_at || new Date().toISOString();
+    state.cloud.lastSyncedSource = "sync";
+    state.cloud.status = "synced";
+    clearCloudError();
+    saveState({ skipCloud: true });
+    renderCloudPanel();
+
+    if (announce) {
+      addNotificationLog("云端已是最新", "本地和 Supabase 中的数据已经保持一致。");
+    }
+  } catch (error) {
+    setCloudError(error.message || "云端同步失败。");
+    if (announce) {
+      addNotificationLog("云同步失败", error.message || "请检查 Supabase 配置和数据库表结构。");
+    }
+  } finally {
+    cloudBusy = false;
+    renderCloudPanel();
+  }
+}
+
+function queueCloudSync() {
+  clearTimeout(cloudSyncTimer);
+  if (!state.cloud.autoSync || !hasCloudProjectConfig() || !state.cloud.userId) return;
+
+  cloudSyncTimer = setTimeout(() => {
+    syncCloudNow({ mode: "push", announce: false }).catch((error) => {
+      setCloudError(error.message || "自动同步失败。");
+    });
+  }, 1200);
+}
+
+async function connectCloudProject() {
+  storeCloudConfigFromInputs();
+  try {
+    state.cloud.status = "configured";
+    clearCloudError();
+    saveState({ skipCloud: true });
+    renderCloudPanel();
+    await ensureCloudClient({ announce: true });
+  } catch (error) {
+    setCloudError(error.message || "连接 Supabase 失败。");
+  }
+}
+
+async function sendCloudMagicLink() {
+  storeCloudConfigFromInputs();
+
+  try {
+    const client = await ensureCloudClient();
+    if (!client) return;
+
+    const email = state.cloud.email || els.cloudEmail.value.trim();
+    if (!email) {
+      setCloudError("请输入用于接收登录链接的邮箱。", { persist: false });
+      return;
+    }
+
+    const result = await client.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: appRedirectUrl(),
+      },
+    });
+
+    if (result.error) throw result.error;
+
+    state.cloud.email = email;
+    state.cloud.status = "link_sent";
+    clearCloudError();
+    saveState({ skipCloud: true });
+    renderCloudPanel();
+    addNotificationLog("登录链接已发送", "请去邮箱里点开 Supabase 的魔法登录链接，再回到 ZenPlan。");
+  } catch (error) {
+    setCloudError(error.message || "发送登录链接失败。");
+  }
+}
+
+async function pullCloudState() {
+  await syncCloudNow({ mode: "pull", announce: true });
+}
+
+async function signOutCloud() {
+  if (!supabaseClient) return;
+
+  try {
+    const result = await supabaseClient.auth.signOut();
+    if (result.error) throw result.error;
+
+    applyCloudIdentity(null);
+    state.cloud.status = hasCloudProjectConfig() ? "configured" : "local_only";
+    state.cloud.lastSyncedAt = "";
+    state.cloud.lastSyncedSource = "";
+    clearCloudError();
+    saveState({ skipCloud: true });
+    renderCloudPanel();
+    addNotificationLog("已退出云端账号", "本地缓存还在，新的修改不会继续上传到云端。");
+  } catch (error) {
+    setCloudError(error.message || "退出云端账号失败。");
+  }
+}
+
+async function initializeCloudSync() {
+  renderCloudPanel();
+  if (!hasCloudProjectConfig()) return;
+
+  try {
+    await ensureCloudClient();
+    if (state.cloud.userId) {
+      await syncCloudNow({ mode: "smart", announce: false });
+    }
+  } catch (error) {
+    setCloudError(error.message || "云端初始化失败。");
+  }
 }
 
 function todayString() {
@@ -458,7 +1081,7 @@ function toggleTaskCompletion(taskId, dateString) {
     });
   });
 
-  saveState();
+  saveState({ markDirty: true });
 }
 
 function expandTasksForDate(dateString) {
@@ -1075,6 +1698,7 @@ function renderSettings() {
 
   els.soundToggle.textContent = state.settings.soundEnabled ? "已开启音效" : "已静音";
   els.soundToggle.classList.toggle("muted", !state.settings.soundEnabled);
+  renderCloudPanel();
 }
 
 function scheduleNotifications(schedule) {
@@ -1414,7 +2038,7 @@ function saveTaskForm(event) {
     );
   }
 
-  saveState();
+  saveState({ markDirty: true });
   renderTasks();
   renderSchedule(true, false);
   closeTaskEditor();
@@ -1439,7 +2063,7 @@ function handleTaskListClick(event) {
   if (!deleteButton) return;
 
   state.tasks = state.tasks.filter((task) => task.id !== deleteButton.dataset.delete);
-  saveState();
+  saveState({ markDirty: true });
   renderTasks();
   renderSchedule(true, false);
 }
@@ -1477,7 +2101,7 @@ function commitSettings({ announce = false } = {}) {
     preferGapBlocks: els.preferGapBlocks.checked,
     planningWindows: readPlanningWindowsFromForm(),
   });
-  saveState();
+  saveState({ markDirty: true });
   renderSettings();
   renderSchedule(false, false);
   if (announce) {
@@ -1540,7 +2164,7 @@ els.settingsForm.addEventListener("submit", (event) => {
 
 els.notifyBeforeEnabled.addEventListener("change", () => {
   state.settings.focusReminderEnabled = els.notifyBeforeEnabled.checked;
-  saveState();
+  saveState({ markDirty: true });
   renderSettings();
   renderSchedule(false, true);
 });
@@ -1549,7 +2173,7 @@ els.notifyBeforeOptions.addEventListener("click", (event) => {
   const button = event.target.closest("[data-minutes]");
   if (!button) return;
   state.settings.reminderBufferMinutes = Number(button.dataset.minutes);
-  saveState();
+  saveState({ markDirty: true });
   renderSettings();
   renderSchedule(false, true);
   addNotificationLog("任务提醒缓冲", `已设置为提前 ${state.settings.reminderBufferMinutes} 分钟。`);
@@ -1559,7 +2183,7 @@ els.planningBufferOptions.addEventListener("click", (event) => {
   const button = event.target.closest("[data-buffer]");
   if (!button) return;
   state.settings.planningBufferMinutes = Number(button.dataset.buffer);
-  saveState();
+  saveState({ markDirty: true });
   renderSettings();
   renderSchedule(false, false);
   addNotificationLog("规划缓冲", `任务之间的默认缓冲更新为 ${state.settings.planningBufferMinutes} 分钟。`);
@@ -1567,14 +2191,14 @@ els.planningBufferOptions.addEventListener("click", (event) => {
 
 els.preferGapBlocks.addEventListener("change", () => {
   state.settings.preferGapBlocks = els.preferGapBlocks.checked;
-  saveState();
+  saveState({ markDirty: true });
   renderSettings();
   renderSchedule(false, false);
 });
 
 els.soundToggle.addEventListener("click", () => {
   state.settings.soundEnabled = !state.settings.soundEnabled;
-  saveState();
+  saveState({ markDirty: true });
   renderSettings();
   addNotificationLog("提示音效状态", state.settings.soundEnabled ? "已开启音效。" : "已静音。");
 });
@@ -1589,6 +2213,34 @@ els.requestPermission.addEventListener("click", async () => {
   addNotificationLog("通知权限", permission === "granted" ? "已启用浏览器通知。" : "未启用浏览器通知。");
 });
 
+els.cloudProjectUrl.addEventListener("change", storeCloudConfigFromInputs);
+els.cloudAnonKey.addEventListener("change", storeCloudConfigFromInputs);
+els.cloudEmail.addEventListener("change", storeCloudConfigFromInputs);
+els.cloudAutoSync.addEventListener("change", () => {
+  state.cloud.autoSync = els.cloudAutoSync.checked;
+  if (!state.cloud.autoSync) {
+    clearTimeout(cloudSyncTimer);
+  }
+  saveState({ skipCloud: true });
+  renderCloudPanel();
+  if (state.cloud.autoSync) queueCloudSync();
+});
+els.cloudConnect.addEventListener("click", () => {
+  connectCloudProject();
+});
+els.cloudSendLink.addEventListener("click", () => {
+  sendCloudMagicLink();
+});
+els.cloudSyncNow.addEventListener("click", () => {
+  syncCloudNow({ mode: "smart", announce: true });
+});
+els.cloudPull.addEventListener("click", () => {
+  pullCloudState();
+});
+els.cloudSignOut.addEventListener("click", () => {
+  signOutCloud();
+});
+
 els.generatePlan.addEventListener("click", () => renderSchedule(true, false));
 
 els.planDate.addEventListener("change", () => {
@@ -1599,9 +2251,14 @@ els.planDate.addEventListener("change", () => {
   renderSchedule(false, false);
 });
 
-els.planDate.value = todayString();
-activateView("today");
-resetTaskForm();
-renderSettings();
-renderTasks();
-renderSchedule(false, false);
+async function bootApp() {
+  els.planDate.value = todayString();
+  activateView("today");
+  resetTaskForm();
+  renderSettings();
+  renderTasks();
+  renderSchedule(false, false);
+  await initializeCloudSync();
+}
+
+bootApp();
