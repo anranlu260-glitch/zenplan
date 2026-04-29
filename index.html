@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZenPlan | AI 智能时间管理</title>
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#D4CBC0" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ZenPlan" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <div class="app-frame">
+      <header class="app-header">
+        <div class="brand-lockup">
+          <p class="eyebrow">ZenPlan AI</p>
+          <div>
+            <h1>智能时间管理</h1>
+            <p class="lede">把课表、临时安排和目标拆进真正可执行的一天。</p>
+          </div>
+        </div>
+
+        <label class="plan-pill">
+          <span>计划日</span>
+          <input id="plan-date" type="date" />
+        </label>
+      </header>
+
+      <main class="app-main">
+        <section id="today-view" class="view active">
+          <div class="screen-shell">
+            <section class="hero-card">
+              <div>
+                <p class="eyebrow">Today Flow</p>
+                <h2 id="today-title">每日安排</h2>
+                <p id="today-subtitle" class="hero-copy">固定课程优先落位，弹性任务自动补进空档。</p>
+              </div>
+              <button id="generate-plan" class="primary-btn" type="button">规划今天</button>
+            </section>
+
+            <section class="panel week-panel">
+              <div class="panel-head compact-head">
+                <div>
+                  <h3>周视图</h3>
+                  <p class="panel-copy">切换日期时，时间线和任务状态会一起刷新。</p>
+                </div>
+              </div>
+              <div id="week-strip" class="week-strip" aria-label="本周日期"></div>
+            </section>
+
+            <section class="panel digest-panel">
+              <div class="panel-head compact-head">
+                <div>
+                  <h3>本周节奏</h3>
+                  <p id="planning-rules-note" class="panel-copy">等待同步规划规则</p>
+                </div>
+              </div>
+              <div class="overview-grid digest-grid">
+                <article class="metric-card compact">
+                  <span>今日总安排</span>
+                  <strong id="metric-total">0</strong>
+                  <small>已进入时间线</small>
+                </article>
+                <article class="metric-card compact">
+                  <span>固定任务</span>
+                  <strong id="metric-fixed">0</strong>
+                  <small>课程与硬性安排</small>
+                </article>
+                <article class="metric-card compact">
+                  <span>弹性任务</span>
+                  <strong id="metric-flexible">0</strong>
+                  <small>自动分配空闲段</small>
+                </article>
+                <article class="metric-card compact">
+                  <span>已完成</span>
+                  <strong id="metric-completed">0</strong>
+                  <small>勾选后实时重排</small>
+                </article>
+              </div>
+              <div class="status-pill-row">
+                <div id="adjustment-note" class="status-pill"></div>
+                <div id="week-progress-note" class="status-pill accent"></div>
+              </div>
+            </section>
+
+            <div class="schedule-layout">
+              <section class="panel timeline-panel">
+                <div class="panel-head">
+                  <div>
+                    <h3>今日时间线</h3>
+                    <p id="next-focus" class="panel-copy">等待生成</p>
+                  </div>
+                </div>
+                <div id="schedule-list" class="timeline" aria-live="polite"></div>
+              </section>
+
+              <aside class="side-stack">
+                <section class="panel insight-panel">
+                  <div class="panel-head compact-head">
+                    <div>
+                      <h3>今日情报</h3>
+                      <p id="today-load-note" class="panel-copy">等待分析</p>
+                    </div>
+                  </div>
+                  <div class="insight-stack">
+                    <article class="insight-row">
+                      <span>截止雷达</span>
+                      <strong id="deadline-alert">暂无临近截止</strong>
+                    </article>
+                    <article class="insight-row">
+                      <span>今日规划规则</span>
+                      <strong id="rule-focus-note">等待计算</strong>
+                    </article>
+                    <article class="insight-row">
+                      <span>规划原则</span>
+                      <p>固定课程优先落位，临近 Deadline 的目标任务会自动加压，并优先考虑课间空档。</p>
+                    </article>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section id="tasks-view" class="view">
+          <div class="screen-shell">
+            <div class="library-layout">
+              <section class="panel library-main">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Task Library</p>
+                    <h2>任务库</h2>
+                    <p class="section-copy">固定课、临时安排和重复任务都在这里管理。</p>
+                  </div>
+                </div>
+                <div class="task-toolbar">
+                  <div class="toolbar-note">
+                    <strong id="task-count-note">0 个任务</strong>
+                    <span>编辑、勾选、删除都会即时反映到日程页。</span>
+                  </div>
+                  <button id="open-task-editor" class="primary-btn" type="button">新建任务</button>
+                </div>
+                <div id="task-list" class="task-list"></div>
+              </section>
+
+              <aside class="side-stack">
+                <section class="overview-grid compact-grid vertical-metrics">
+                  <article class="metric-card compact">
+                    <span>全部任务</span>
+                    <strong id="task-metric-total">0</strong>
+                    <small>当前任务库规模</small>
+                  </article>
+                  <article class="metric-card compact">
+                    <span>固定安排</span>
+                    <strong id="task-metric-fixed">0</strong>
+                    <small>已锁定时段</small>
+                  </article>
+                  <article class="metric-card compact">
+                    <span>重复任务</span>
+                    <strong id="task-metric-recurring">0</strong>
+                    <small>每日 / 每周 / 特定日期</small>
+                  </article>
+                </section>
+
+                <section class="panel insight-panel">
+                  <div class="panel-head compact-head">
+                    <div>
+                      <h3>库内视角</h3>
+                      <p class="panel-copy">让任务库更像一个真正的工作台。</p>
+                    </div>
+                  </div>
+                  <div class="insight-stack">
+                    <article class="insight-row">
+                      <span>今天会发生</span>
+                      <strong id="library-today-count">0 项</strong>
+                    </article>
+                    <article class="insight-row">
+                      <span>临近截止</span>
+                      <strong id="library-deadline-count">0 项</strong>
+                    </article>
+                    <article class="insight-row">
+                      <span>固定课占比</span>
+                      <strong id="library-fixed-ratio">0%</strong>
+                    </article>
+                  </div>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section id="settings-view" class="view">
+          <div class="screen-shell">
+            <div class="settings-layout">
+              <section class="panel settings-main-panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Settings</p>
+                    <h2>智能平衡偏好</h2>
+                    <p class="section-copy">决定提醒节奏、规划规则和本地同步体验。</p>
+                  </div>
+                  <button id="request-permission" class="secondary-btn" type="button">启用浏览器通知</button>
+                </div>
+
+                <form id="settings-form" class="settings-grid">
+                  <label class="switch-row">
+                    <span>
+                      焦点提醒
+                      <small>任务开始前的柔和铃声</small>
+                    </span>
+                    <input id="notify-before-enabled" type="checkbox" checked />
+                  </label>
+
+                  <div class="settings-field">
+                    <span class="field-label">任务提醒缓冲</span>
+                    <div id="notify-before-options" class="segmented-grid" role="group" aria-label="任务提醒缓冲">
+                      <button type="button" data-minutes="5">5分钟</button>
+                      <button type="button" data-minutes="10">10分钟</button>
+                      <button type="button" data-minutes="15">15分钟</button>
+                      <button type="button" data-minutes="30">30分钟</button>
+                    </div>
+                  </div>
+
+                  <div class="settings-field">
+                    <span class="field-label">规划缓冲</span>
+                    <div id="planning-buffer-options" class="segmented-grid" role="group" aria-label="规划缓冲">
+                      <button type="button" data-buffer="5">5分钟</button>
+                      <button type="button" data-buffer="10">10分钟</button>
+                      <button type="button" data-buffer="15">15分钟</button>
+                      <button type="button" data-buffer="20">20分钟</button>
+                    </div>
+                  </div>
+
+                  <label class="switch-row">
+                    <span>
+                      优先利用课间空档
+                      <small>有固定课程时，先把弹性任务塞进中间的空闲时段。</small>
+                    </span>
+                    <input id="prefer-gap-blocks" type="checkbox" checked />
+                  </label>
+
+                  <div class="settings-field">
+                    <span class="field-label">学习时间窗</span>
+                    <div class="settings-time-grid">
+                      <label>
+                        上午
+                        <div class="time-pair">
+                          <input id="window-morning-start" type="time" />
+                          <input id="window-morning-end" type="time" />
+                        </div>
+                      </label>
+                      <label>
+                        下午
+                        <div class="time-pair">
+                          <input id="window-afternoon-start" type="time" />
+                          <input id="window-afternoon-end" type="time" />
+                        </div>
+                      </label>
+                      <label>
+                        晚上
+                        <div class="time-pair">
+                          <input id="window-evening-start" type="time" />
+                          <input id="window-evening-end" type="time" />
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div class="switch-row">
+                    <span>提示音效状态</span>
+                    <button id="sound-toggle" class="sound-toggle" type="button">已开启音效</button>
+                  </div>
+
+                  <button class="primary-btn" type="submit">保存设置</button>
+                </form>
+              </section>
+
+              <aside class="side-stack">
+                <div class="sync-card">
+                  <h3>本地同步已开启</h3>
+                  <p>您的偏好和日程会保存在当前浏览器中，像 app 一样持续可用。</p>
+                  <span>LOCAL SYNC</span>
+                </div>
+
+                <section class="panel insight-panel">
+                  <div class="panel-head compact-head">
+                    <div>
+                      <h3>设计方向</h3>
+                      <p class="panel-copy">保留原配色，把层级、留白和 app 气质往前推。</p>
+                    </div>
+                  </div>
+                  <div id="notification-log" class="notification-log"></div>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="主要视图">
+        <button class="nav-tab active" data-view="today" type="button">
+          <span class="nav-icon">01</span>
+          <span>日程</span>
+        </button>
+        <button class="nav-tab" data-view="tasks" type="button">
+          <span class="nav-icon">02</span>
+          <span>任务库</span>
+        </button>
+        <button class="nav-tab" data-view="settings" type="button">
+          <span class="nav-icon">03</span>
+          <span>设置</span>
+        </button>
+      </nav>
+    </div>
+
+    <div id="task-editor-modal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-close-modal="true"></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="task-editor-title">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Task Editor</p>
+            <h2 id="task-editor-title">新建任务</h2>
+            <p class="section-copy">支持固定课表、完成后顺延的重复任务，以及可调提醒。</p>
+          </div>
+          <button id="close-task-editor" class="icon-btn" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <form id="task-form" class="task-form">
+          <label>
+            任务名称
+            <input id="task-title" type="text" placeholder="例如：高数课 / 英语听力 / 项目汇报" required />
+          </label>
+
+          <div class="form-grid">
+            <label>
+              类型
+              <select id="task-kind">
+                <option value="fixed">固定安排</option>
+                <option value="flexible">常规任务</option>
+                <option value="deadline">目标任务</option>
+              </select>
+            </label>
+            <label>
+              重要度
+              <select id="task-priority">
+                <option value="3">高</option>
+                <option value="2" selected>中</option>
+                <option value="1">低</option>
+              </select>
+            </label>
+          </div>
+
+          <label class="switch-row">
+            <span>
+              固定时间段运行
+              <small>为周期任务锁定具体开始与结束时间，适合录入每周课表。</small>
+            </span>
+            <input id="task-fixed-slot-enabled" type="checkbox" checked />
+          </label>
+
+          <div id="task-time-window-wrap" class="form-grid">
+            <label>
+              开始时间
+              <input id="task-start" type="time" value="09:00" />
+            </label>
+            <label>
+              结束时间
+              <input id="task-end" type="time" value="10:00" />
+            </label>
+          </div>
+
+          <label id="task-duration-wrap">
+            持续时长（分钟）
+            <input id="task-duration" type="number" min="5" step="5" value="60" required />
+          </label>
+
+          <div class="form-grid">
+            <label>
+              重复频率
+              <select id="task-frequency">
+                <option value="once">不重复</option>
+                <option value="daily">每日</option>
+                <option value="weekly">每周 / 周期</option>
+                <option value="specific">特定日期</option>
+              </select>
+            </label>
+            <label id="weekly-mode-wrap" class="hidden">
+              周期模式
+              <select id="task-weekly-mode">
+                <option value="same_day">每周</option>
+                <option value="custom_days">自定义天数</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="repeat-advanced-wrap" class="form-grid hidden">
+            <label>
+              重复间隔
+              <input id="task-repeat-interval" type="number" min="1" step="1" value="1" />
+            </label>
+            <label id="repeat-strategy-wrap" class="hidden">
+              更新方式
+              <select id="task-repeat-strategy">
+                <option value="calendar">按日历重复</option>
+                <option value="after_completion">完成后顺延</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="custom-weekday-wrap" class="hidden">
+            <span class="field-label">自定义天数</span>
+            <div id="weekly-options" class="weekday-picker hidden" aria-label="每周重复日期">
+              <label><input type="checkbox" value="1" />周一</label>
+              <label><input type="checkbox" value="2" />周二</label>
+              <label><input type="checkbox" value="3" />周三</label>
+              <label><input type="checkbox" value="4" />周四</label>
+              <label><input type="checkbox" value="5" />周五</label>
+              <label><input type="checkbox" value="6" />周六</label>
+              <label><input type="checkbox" value="0" />周日</label>
+            </div>
+          </div>
+
+          <label id="specific-dates-wrap" class="hidden">
+            特定日期
+            <input id="specific-dates" type="text" placeholder="2026-04-28, 2026-05-01" />
+          </label>
+
+          <label id="once-date-wrap">
+            日期
+            <input id="task-date" type="date" />
+          </label>
+
+          <label>
+            最终截止日期（Deadline）
+            <input id="task-deadline" type="datetime-local" />
+          </label>
+
+          <label class="switch-row">
+            <span>
+              任务提醒
+              <small>可以对特定任务覆盖全局提醒时间。</small>
+            </span>
+            <input id="task-reminder-enabled" type="checkbox" checked />
+          </label>
+
+          <label id="task-reminder-lead-wrap">
+            提前提醒
+            <select id="task-reminder-lead">
+              <option value="">跟随全局设置</option>
+              <option value="5">5 分钟</option>
+              <option value="10">10 分钟</option>
+              <option value="15">15 分钟</option>
+              <option value="30">30 分钟</option>
+              <option value="60">60 分钟</option>
+            </select>
+          </label>
+
+          <div class="modal-actions">
+            <button id="cancel-task-editor" class="ghost-btn" type="button">取消</button>
+            <button id="task-submit-button" class="primary-btn" type="submit">保存任务</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
