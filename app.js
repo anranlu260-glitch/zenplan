@@ -128,6 +128,28 @@ const els = {
   todayLoadNote: document.querySelector("#today-load-note"),
   deadlineAlert: document.querySelector("#deadline-alert"),
   ruleFocusNote: document.querySelector("#rule-focus-note"),
+  todayTitleModern: document.querySelector("#today-title-modern"),
+  todaySubtitleModern: document.querySelector("#today-subtitle-modern"),
+  todayBadgeModern: document.querySelector("#today-badge-modern"),
+  generatePlanModern: document.querySelector("#generate-plan-modern"),
+  weekStripModern: document.querySelector("#week-strip-modern"),
+  planningRulesNoteModern: document.querySelector("#planning-rules-note-modern"),
+  adjustmentNoteModern: document.querySelector("#adjustment-note-modern"),
+  weekProgressNoteModern: document.querySelector("#week-progress-note-modern"),
+  scheduleListModern: document.querySelector("#schedule-list-modern"),
+  remainingCountModern: document.querySelector("#remaining-count-modern"),
+  progressRateModern: document.querySelector("#progress-rate-modern"),
+  metricFixedModern: document.querySelector("#metric-fixed-modern"),
+  metricFlexibleModern: document.querySelector("#metric-flexible-modern"),
+  metricCompletedModern: document.querySelector("#metric-completed-modern"),
+  nextFocusModern: document.querySelector("#next-focus-modern"),
+  todayLoadNoteModern: document.querySelector("#today-load-note-modern"),
+  deadlineAlertModern: document.querySelector("#deadline-alert-modern"),
+  deadlineListModern: document.querySelector("#deadline-list-modern"),
+  ruleFocusNoteModern: document.querySelector("#rule-focus-note-modern"),
+  completionScoreModern: document.querySelector("#completion-score-modern"),
+  completionScoreNoteModern: document.querySelector("#completion-score-note-modern"),
+  navQuickAdd: document.querySelector("#nav-quick-add"),
   openTaskEditor: document.querySelector("#open-task-editor"),
   closeTaskEditor: document.querySelector("#close-task-editor"),
   cancelTaskEditor: document.querySelector("#cancel-task-editor"),
@@ -334,6 +356,14 @@ function normalizeWindow(windowValue, fallback) {
   const start = windowValue?.start || fallback.start;
   const end = windowValue?.end || fallback.end;
   return parseMinutes(end) > parseMinutes(start) ? { start, end } : { ...fallback };
+}
+
+function setText(node, value) {
+  if (node) node.textContent = value;
+}
+
+function setHtml(node, value) {
+  if (node) node.innerHTML = value;
 }
 
 function touchStateMeta() {
@@ -949,6 +979,72 @@ function monthDayLabel(date) {
   }).format(date);
 }
 
+function englishWeekdayLabel(date, format = "short") {
+  return new Intl.DateTimeFormat("en-US", { weekday: format }).format(date);
+}
+
+function formatReferenceHeadline(dateString) {
+  const date = new Date(`${dateString}T12:00:00`);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}年${month}月${day}日 ${englishWeekdayLabel(date, "long")}`;
+}
+
+function scheduleProgressRate(schedule) {
+  if (!schedule.length) return 0;
+  const completedCount = schedule.filter((item) => item.completed).length;
+  return Math.round((completedCount / schedule.length) * 100);
+}
+
+function deadlineMetaText(deadline, dateString) {
+  const daysLeft = daysBetween(dateString, deadline.slice(0, 10));
+  if (daysLeft <= 0) return "今天截止";
+  if (daysLeft === 1) return "还剩 1 天";
+  return `还剩 ${daysLeft} 天`;
+}
+
+function deadlineListMarkup(dateString) {
+  const deadlines = state.tasks
+    .map(normalizeTask)
+    .filter((task) => task.kind === "deadline" && task.deadline && !task.completed)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline))
+    .slice(0, 3);
+
+  if (!deadlines.length) {
+    return '<article class="deadline-entry is-empty"><span class="deadline-entry-label">暂无临近截止任务</span><small class="deadline-entry-meta">把阶段性目标录入任务库后，这里会自动出现。</small></article>';
+  }
+
+  return deadlines
+    .map(
+      (task) => `
+        <article class="deadline-entry">
+          <span class="deadline-entry-label">${escapeHtml(task.title)}</span>
+          <small class="deadline-entry-meta">${deadlineMetaText(task.deadline, dateString)}</small>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function completionScoreNote(rate, schedule) {
+  if (!schedule.length) return "等待今日排程";
+  if (rate >= 90) return "推进效率佳";
+  if (rate >= 60) return "节奏稳定";
+  if (schedule.filter((item) => item.placementHint === "gap").length >= 2) return "课间节奏友好";
+  return "接着推进重点";
+}
+
+function dailyBriefSubtitle(schedule) {
+  if (!schedule.length) {
+    return "先录入课程表、临时安排和目标任务，今日计划才会真正展开。";
+  }
+
+  const fixedCount = schedule.filter((item) => item.fixedSlot).length;
+  const flexibleCount = schedule.filter((item) => !item.fixedSlot).length;
+  return `固定安排 ${fixedCount} 项，弹性任务 ${flexibleCount} 项，整天的节奏已经整理成可执行时间线。`;
+}
+
 function parseMinutes(time) {
   const [hour, minute] = String(time || "00:00").split(":").map(Number);
   return hour * 60 + minute;
@@ -1434,7 +1530,7 @@ function renderWeekStrip(dateString) {
   const weekStart = startOfWeek(dateString);
   const today = todayString();
 
-  els.weekStrip.innerHTML = Array.from({ length: 7 }, (_, index) => {
+  const markup = Array.from({ length: 7 }, (_, index) => {
     const date = addDays(weekStart, index);
     const value = toDateString(date);
     return `
@@ -1444,35 +1540,66 @@ function renderWeekStrip(dateString) {
         type="button"
         aria-pressed="${value === dateString}"
       >
-        <span class="week-day-label">${weekdayChipLabel(date)}</span>
+        <span class="week-day-label">${englishWeekdayLabel(date).toUpperCase()}</span>
         <strong class="week-day-date">${date.getDate()}</strong>
         <small class="week-day-meta">${monthDayLabel(date)}</small>
       </button>
     `;
   }).join("");
+
+  setHtml(els.weekStrip, markup);
+  setHtml(els.weekStripModern, markup);
 }
 
 function renderTodayInsights(schedule, dateString, { changed = false, forceAdjustment = false } = {}) {
   const fixedCount = schedule.filter((item) => item.fixedSlot).length;
+  const flexibleCount = schedule.filter((item) => !item.fixedSlot).length;
+  const completedCount = schedule.filter((item) => item.completed).length;
   const remainingCount = schedule.filter((item) => !item.completed).length;
-
-  els.todayTitle.textContent = `${formatDisplayDate(dateString)} 的整体安排`;
-  els.todaySubtitle.textContent = `固定安排 ${fixedCount} 项，剩余待做 ${remainingCount} 项。`;
-  els.metricTotal.textContent = String(schedule.length);
-  els.metricFixed.textContent = String(fixedCount);
-  els.metricFlexible.textContent = String(schedule.filter((item) => !item.fixedSlot).length);
-  els.metricCompleted.textContent = String(schedule.filter((item) => item.completed).length);
-  els.todayLoadNote.textContent = scheduleLoadNote(schedule);
-  els.deadlineAlert.textContent = deadlineAlertText(dateString);
-  els.ruleFocusNote.textContent = ruleFocusText(schedule);
-  els.planningRulesNote.textContent = planningRuleSummaryText();
-  els.weekProgressNote.textContent = weekProgressText(dateString);
-
-  els.adjustmentNote.textContent = forceAdjustment
+  const progressRate = scheduleProgressRate(schedule);
+  const deadlineAlert = deadlineAlertText(dateString);
+  const ruleFocus = ruleFocusText(schedule);
+  const planningRules = planningRuleSummaryText();
+  const weekProgress = weekProgressText(dateString);
+  const loadNote = scheduleLoadNote(schedule);
+  const nextFocus = nextFocusText(schedule, dateString);
+  const adjustmentText = forceAdjustment
     ? "已结合当前时间点和已完成情况，重新优化今天剩余时间的安排。"
     : changed
-      ? "任务状态发生变化，界面已实时同步。"
-      : "计划已同步当前任务。新增、勾选或编辑任务后，可重新生成一天的节奏。";
+      ? "任务状态刚刚发生变化，首页信息和时间线都已经同步刷新。"
+      : "固定课表会优先落位，弹性任务则会贴着你今天的空档自然展开。";
+
+  setText(els.todayTitle, `${formatDisplayDate(dateString)} 的整体安排`);
+  setText(els.todaySubtitle, `固定安排 ${fixedCount} 项，剩余待做 ${remainingCount} 项。`);
+  setText(els.metricTotal, String(schedule.length));
+  setText(els.metricFixed, String(fixedCount));
+  setText(els.metricFlexible, String(flexibleCount));
+  setText(els.metricCompleted, String(completedCount));
+  setText(els.todayLoadNote, loadNote);
+  setText(els.deadlineAlert, deadlineAlert);
+  setText(els.ruleFocusNote, ruleFocus);
+  setText(els.planningRulesNote, planningRules);
+  setText(els.weekProgressNote, weekProgress);
+  setText(els.adjustmentNote, adjustmentText);
+
+  setText(els.todayTitleModern, formatReferenceHeadline(dateString));
+  setText(els.todaySubtitleModern, dailyBriefSubtitle(schedule));
+  setText(els.todayBadgeModern, `待办:${remainingCount}`);
+  setText(els.adjustmentNoteModern, adjustmentText);
+  setText(els.remainingCountModern, `${remainingCount} 个`);
+  setText(els.progressRateModern, `${progressRate}%`);
+  setText(els.metricFixedModern, String(fixedCount));
+  setText(els.metricFlexibleModern, String(flexibleCount));
+  setText(els.metricCompletedModern, String(completedCount));
+  setText(els.ruleFocusNoteModern, ruleFocus);
+  setText(els.planningRulesNoteModern, planningRules);
+  setText(els.todayLoadNoteModern, loadNote);
+  setText(els.weekProgressNoteModern, weekProgress);
+  setText(els.nextFocusModern, nextFocus);
+  setText(els.deadlineAlertModern, deadlineAlert);
+  setHtml(els.deadlineListModern, deadlineListMarkup(dateString));
+  setText(els.completionScoreModern, `${progressRate}%`);
+  setText(els.completionScoreNoteModern, completionScoreNote(progressRate, schedule));
 }
 
 function renderSchedule(forceAdjustment = false, preserveLayout = false) {
@@ -1485,7 +1612,7 @@ function renderSchedule(forceAdjustment = false, preserveLayout = false) {
 
   renderWeekStrip(dateString);
   renderTodayInsights(schedule, dateString, { changed, forceAdjustment });
-  els.nextFocus.textContent = nextFocusText(schedule, dateString);
+  setText(els.nextFocus, nextFocusText(schedule, dateString));
 
   state.lastPlanSignature = signature;
   lastRenderedSchedule = schedule.map((item) => ({ ...item }));
@@ -1493,12 +1620,14 @@ function renderSchedule(forceAdjustment = false, preserveLayout = false) {
   saveState();
 
   if (!schedule.length) {
-    els.scheduleList.innerHTML = '<div class="empty-state">今天还没有安排。</div>';
+    const emptyMarkup = '<div class="empty-state">今天还没有安排，把课程、临时任务或目标任务录入后再来规划。</div>';
+    setHtml(els.scheduleList, emptyMarkup);
+    setHtml(els.scheduleListModern, emptyMarkup);
     scheduleNotifications([]);
     return;
   }
 
-  els.scheduleList.innerHTML = schedule
+  const markup = schedule
     .map((item) => {
       const task = state.tasks.find((entry) => entry.id === item.taskId);
       const toggleDisabled = !task;
@@ -1521,6 +1650,9 @@ function renderSchedule(forceAdjustment = false, preserveLayout = false) {
       `;
     })
     .join("");
+
+  setHtml(els.scheduleList, markup);
+  setHtml(els.scheduleListModern, markup);
 
   if (forceAdjustment && state.settings.notifyAdjustments) {
     notify("今日计划已重排", "已基于当前时间和完成情况优化剩余安排。");
@@ -2077,6 +2209,18 @@ function handleScheduleClick(event) {
   renderSchedule(false, true);
 }
 
+function handleWeekStripClick(event) {
+  const target = event.target.closest("[data-week-date]");
+  if (!target) return;
+
+  els.planDate.value = target.dataset.weekDate;
+  if (!editingTaskId && els.taskEditorModal.classList.contains("hidden")) {
+    els.taskDate.value = els.planDate.value;
+  }
+  renderTasks();
+  renderSchedule(false, false);
+}
+
 function readPlanningWindowsFromForm() {
   return {
     morning: {
@@ -2114,6 +2258,9 @@ els.tabs.forEach((tab) => {
 });
 
 els.openTaskEditor.addEventListener("click", () => openTaskEditor());
+if (els.navQuickAdd) {
+  els.navQuickAdd.addEventListener("click", () => openTaskEditor());
+}
 els.closeTaskEditor.addEventListener("click", closeTaskEditor);
 els.cancelTaskEditor.addEventListener("click", closeTaskEditor);
 els.taskEditorModal.addEventListener("click", (event) => {
@@ -2145,17 +2292,13 @@ els.taskEnd.addEventListener("change", syncDurationFromTimeWindow);
 els.taskForm.addEventListener("submit", saveTaskForm);
 els.taskList.addEventListener("click", handleTaskListClick);
 els.scheduleList.addEventListener("click", handleScheduleClick);
-els.weekStrip.addEventListener("click", (event) => {
-  const target = event.target.closest("[data-week-date]");
-  if (!target) return;
-
-  els.planDate.value = target.dataset.weekDate;
-  if (!editingTaskId && els.taskEditorModal.classList.contains("hidden")) {
-    els.taskDate.value = els.planDate.value;
-  }
-  renderTasks();
-  renderSchedule(false, false);
-});
+if (els.scheduleListModern) {
+  els.scheduleListModern.addEventListener("click", handleScheduleClick);
+}
+els.weekStrip.addEventListener("click", handleWeekStripClick);
+if (els.weekStripModern) {
+  els.weekStripModern.addEventListener("click", handleWeekStripClick);
+}
 
 els.settingsForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2242,6 +2385,9 @@ els.cloudSignOut.addEventListener("click", () => {
 });
 
 els.generatePlan.addEventListener("click", () => renderSchedule(true, false));
+if (els.generatePlanModern) {
+  els.generatePlanModern.addEventListener("click", () => renderSchedule(true, false));
+}
 
 els.planDate.addEventListener("change", () => {
   if (!editingTaskId && els.taskEditorModal.classList.contains("hidden")) {

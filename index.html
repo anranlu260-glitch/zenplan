@@ -34,6 +34,95 @@
       <main class="app-main">
         <section id="today-view" class="view active">
           <div class="screen-shell">
+            <section class="panel week-panel reference-week-panel">
+              <div id="week-strip-modern" class="week-strip modern-week-strip" aria-label="本周日期"></div>
+            </section>
+
+            <section class="today-heading modern-heading">
+              <div>
+                <p class="eyebrow">Daily View</p>
+                <h2 id="today-title-modern">2026年04月29日 Wednesday</h2>
+              </div>
+              <div id="today-badge-modern" class="today-badge">待办: 0</div>
+            </section>
+
+            <section class="panel daily-brief-panel">
+              <div class="panel-head daily-brief-head">
+                <div>
+                  <h3>每日简报</h3>
+                  <p id="today-subtitle-modern" class="panel-copy">固定课表优先落位，弹性任务自动补进空档。</p>
+                </div>
+                <div class="brief-icon-shell" aria-hidden="true"></div>
+              </div>
+
+              <p id="adjustment-note-modern" class="brief-story">等待今日节奏分析。</p>
+
+              <div class="brief-metric-grid">
+                <article class="brief-stat-card">
+                  <span>剩余任务</span>
+                  <strong id="remaining-count-modern">0 个</strong>
+                </article>
+                <article class="brief-stat-card">
+                  <span>平均进度</span>
+                  <strong id="progress-rate-modern">0%</strong>
+                </article>
+              </div>
+
+              <div class="brief-chip-row">
+                <div class="brief-chip">
+                  <span>固定安排</span>
+                  <strong id="metric-fixed-modern">0</strong>
+                </div>
+                <div class="brief-chip">
+                  <span>弹性任务</span>
+                  <strong id="metric-flexible-modern">0</strong>
+                </div>
+                <div class="brief-chip">
+                  <span>已完成</span>
+                  <strong id="metric-completed-modern">0</strong>
+                </div>
+              </div>
+
+              <section class="deadline-info-block">
+                <div class="deadline-info-head">
+                  <span>核心目标临近</span>
+                  <small>DEADLINE INFO</small>
+                </div>
+                <div id="deadline-list-modern" class="deadline-list"></div>
+              </section>
+            </section>
+
+            <section class="focus-banner">
+              <div class="focus-banner-copy">
+                <h3>重新规划焦点</h3>
+                <p id="rule-focus-note-modern" class="focus-lead">等待计算</p>
+                <p id="planning-rules-note-modern" class="focus-support">等待同步规划规则</p>
+              </div>
+              <button id="generate-plan-modern" class="primary-btn focus-button" type="button">规划今天</button>
+              <div class="focus-mark" aria-hidden="true"></div>
+            </section>
+
+            <section class="timeline-caption modern-timeline-caption">
+              <div class="timeline-caption-main">
+                <span class="timeline-caption-dot"></span>
+                <strong>已优化时间轴</strong>
+              </div>
+              <p id="today-load-note-modern" class="panel-copy">等待分析</p>
+              <p id="week-progress-note-modern" class="timeline-caption-meta">本周完成 0 / 0</p>
+              <p id="next-focus-modern" class="timeline-caption-meta">等待生成</p>
+            </section>
+
+            <section class="timeline-stage">
+              <div id="schedule-list-modern" class="timeline refined-timeline" aria-live="polite"></div>
+            </section>
+
+            <section class="footer-score-card">
+              <div>
+                <strong id="completion-score-modern" class="footer-score-value">0%</strong>
+                <p id="completion-score-note-modern" class="footer-score-note">建议效率值</p>
+              </div>
+              <div class="footer-score-pill" id="deadline-alert-modern">暂无临近截止</div>
+            </section>
             <section class="hero-card">
               <div>
                 <p class="eyebrow">Today Flow</p>
@@ -364,18 +453,19 @@
 
       <nav class="bottom-nav" aria-label="主要视图">
         <button class="nav-tab active" data-view="today" type="button">
-          <span class="nav-icon">01</span>
+          <span class="nav-icon" aria-hidden="true">◷</span>
           <span>日程</span>
         </button>
         <button class="nav-tab" data-view="tasks" type="button">
-          <span class="nav-icon">02</span>
+          <span class="nav-icon" aria-hidden="true">▣</span>
           <span>任务库</span>
         </button>
         <button class="nav-tab" data-view="settings" type="button">
-          <span class="nav-icon">03</span>
+          <span class="nav-icon" aria-hidden="true">⚙</span>
           <span>设置</span>
         </button>
       </nav>
+      <button id="nav-quick-add" class="nav-fab" type="button" aria-label="鏂板缓浠诲姟">+</button>
     </div>
 
     <div id="task-editor-modal" class="modal hidden" aria-hidden="true">
