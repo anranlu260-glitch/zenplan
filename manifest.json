@@ -1,0 +1,15 @@
+{
+  "short_name": "ZenPlan",
+  "name": "ZenPlan AI 智能时间管理",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3652/3652191.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#D4CBC0",
+  "background_color": "#FCFAFA"
+}
